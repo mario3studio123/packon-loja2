@@ -368,16 +368,12 @@
 
 .selectorContainer {
   /* Distribuição Harmônica dos Seletores Principais */
-  flex: 1 0 40%; /* Tenta ocupar 50% da linha */
+  flex: 1 0 40%;
   min-width: 160px;
-  
   position: relative;
   
-  /* TRUQUE DO Z-INDEX: 
-     Quando fecha, espera 0.4s para baixar o z-index (tempo da animação).
-     Assim o menu não "entra" pra trás do botão de baixo antes de sumir. */
-  z-index: 10;
-  transition: z-index 0s linear 0.4s; 
+  /* Removemos as transitions de z-index daqui para controlar via GSAP */
+  z-index: 1; /* Valor base baixo */
 }
 
 /* Classe auxiliar para jogar o item aberto pra frente de todos */

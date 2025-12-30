@@ -30,58 +30,56 @@ export default function OptionSelector({
   const toggleOpen = () => setIsOpen(!isOpen);
 
   // --- LÓGICA DE ORDENAÇÃO INTELIGENTE (Natural Sort) ---
-  // Isso garante que "100 unidades" venha depois de "50 unidades"
-  // e não antes (ordem alfabética vs numérica).
   const sortedOptions = useMemo(() => {
     return [...options].sort((a, b) => {
-      // Tenta extrair números das strings (ex: "100 un" -> 100)
       const numA = parseInt(a.replace(/\D/g, '')) || 0;
       const numB = parseInt(b.replace(/\D/g, '')) || 0;
 
-      // Se ambos tiverem números, ordena pelo valor numérico
       if (numA > 0 && numB > 0) {
         if (numA !== numB) return numA - numB;
       }
-      
-      // Fallback para ordem alfabética se não forem números
       return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     });
   }, [options]);
 
-  // Animação de Abertura/Fechamento
+  // --- ANIMAÇÃO E CONTROLE DE Z-INDEX ---
   useGSAP(() => {
-    if (!listRef.current || !iconRef.current) return;
+    if (!listRef.current || !iconRef.current || !containerRef.current) return;
 
     if (isOpen) {
+      // 1. AO ABRIR: Subimos o z-index IMEDIATAMENTE para ele ficar por cima de tudo
+      gsap.set(containerRef.current, { zIndex: 100 });
+
       gsap.to(listRef.current, {
         height: "auto",
         autoAlpha: 1,
         duration: 0.4,
         ease: "power3.out"
       });
-      gsap.to(iconRef.current, { rotation: 180, duration: 0.3 });
       
-      // Ajuste de z-index para garantir que fique por cima
-      if(containerRef.current) containerRef.current.style.zIndex = "50";
+      gsap.to(iconRef.current, { rotation: 180, duration: 0.3 });
 
     } else {
+      // 2. AO FECHAR: Animamos a altura...
       gsap.to(listRef.current, {
         height: 0,
         autoAlpha: 0,
         duration: 0.3,
         ease: "power3.in",
+        // 3. ... e SÓ baixamos o z-index quando a animação terminar completamente.
+        // Isso impede que o menu "corte" passando por trás do item de baixo.
         onComplete: () => {
-             // Retorna z-index ao normal após fechar
-             if(containerRef.current) containerRef.current.style.zIndex = "10";
+             gsap.set(containerRef.current, { zIndex: 1 });
         }
       });
+      
       gsap.to(iconRef.current, { rotation: 0, duration: 0.3 });
     }
   }, { scope: containerRef, dependencies: [isOpen] });
 
   return (
     <div 
-      className={`${styles.selectorContainer} ${isOpen ? styles.selectorContainerOpen : ''}`} 
+      className={styles.selectorContainer} 
       ref={containerRef}
     >
       
@@ -89,6 +87,7 @@ export default function OptionSelector({
       <button 
         className={`${styles.selectorHeader} ${isOpen ? styles.selectorHeaderActive : ''}`} 
         onClick={toggleOpen}
+        type="button" // Boa prática para evitar submits acidentais em forms
       >
         <div className={styles.selectorLabelInfo}>
           <span className={styles.selectorLabelTitle}>{label}</span>
@@ -106,24 +105,21 @@ export default function OptionSelector({
             const isValid = isOptionValid(label, value);
             const isSelected = selected === value;
 
-            // --- LÓGICA DE FILTRO ---
-            // Se a opção NÃO for válida e NÃO for a selecionada, ela desaparece.
-            // Retornamos null para não renderizar nada no DOM.
-            if (!isValid && !isSelected) {
-                return null;
-            }
-
             return (
               <button
                 key={value}
+                type="button"
                 onClick={() => {
                   onChange(value);
                   setIsOpen(false);
                 }}
+                disabled={!isValid && !isSelected}
                 className={`
                   ${styles.optionItem} 
                   ${isSelected ? styles.optionSelected : ''}
+                  ${!isValid ? styles.optionUnavailable : ''}
                 `}
+                title={!isValid ? "Indisponível nesta combinação" : ""}
               >
                 {value}
               </button>

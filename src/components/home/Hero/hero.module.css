@@ -149,12 +149,13 @@
   }
 }
 
-@media (max-height: 600px) {
+@media (max-height: 700px) {
 
   .heroSection {
     height: auto; 
     min-height: 100vh;
-    padding-bottom: 2rem;
+    padding-bottom: 0rem;
+        padding-top: 20px;
   }
 
 
