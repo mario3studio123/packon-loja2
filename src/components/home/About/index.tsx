@@ -96,9 +96,7 @@ export default function About() {
 
   return (
     <section className={styles.section} ref={containerRef} id="quem-somos">
-      
       <div className={styles.contentContainer}>
-        
         <div className={styles.grid}>
           {/* Coluna 1: Título */}
           <div className={styles.colLeft}>
