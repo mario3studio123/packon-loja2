@@ -3,7 +3,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
-import { Loader2, Check, ShoppingBag, ArrowRight } from "lucide-react"; 
+import { Loader2, Check, ShoppingBag, ArrowRight, Truck } from "lucide-react"; 
 import styles from "./productView.module.css";
 import { formatPrice } from "@/utils/format";
 import { useCartStore } from "@/store/cartStore";
@@ -25,9 +25,6 @@ export default function ProductView({ product }: ProductViewProps) {
   const mainImageRef = useRef<HTMLImageElement>(null);
   const imageWrapperRef = useRef<HTMLDivElement>(null);
   
-  // ⚡ LCP OPTIMIZATION: Ref para rastrear se é a primeira carga da página
-  const isFirstLoad = useRef(true);
-
   // Hooks de Lógica
   const { 
     currentVariant, 
@@ -38,40 +35,54 @@ export default function ProductView({ product }: ProductViewProps) {
 
   const { 
     cep, 
-    handleCepChange, 
+    handleCepChange, // Já vem com formatação básica, mas vamos reforçar na UI
     calculate: calculateShipping, 
     loading: cepLoading, 
-    options: shippingOptions 
+    options: shippingOptions,
+    // 🔥 BLINDAGEM: Precisamos saber se já calculou para resetar se mudar variante
+    hasCalculated 
   } = useShipping();
 
   const { addItem, openCart } = useCartStore();
 
+  // Estados UI
   const [selectedImage, setSelectedImage] = useState(product.images.edges[0]?.node.url || "");
   const [isImageLoading, setIsImageLoading] = useState(false);
-  
   const [isAdding, setIsAdding] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [zoomStyle, setZoomStyle] = useState<React.CSSProperties>({});
+  
+  // 🔥 BLINDAGEM: Estado local para resetar o frete visualmente se a variante mudar
+  const [showShippingResults, setShowShippingResults] = useState(false);
 
   const { contextSafe } = useGSAP({ scope: containerRef });
 
-  // --- LÓGICA DE TROCA DE IMAGEM ---
-  
+  // --- EFEITOS DE BLINDAGEM ---
+
+  // 1. Resetar resultados de frete se a variante mudar (preço/peso mudam)
+  useEffect(() => {
+    setShowShippingResults(false);
+  }, [currentVariant?.id]);
+
+  // 2. Sincroniza resultado do hook de frete com a UI
+  useEffect(() => {
+    if (hasCalculated && !cepLoading) {
+        setShowShippingResults(true);
+    }
+  }, [hasCalculated, cepLoading]);
+
+  // --- LÓGICA DE IMAGEM ---
   const requestImageChange = contextSafe((newUrl: string) => {
     if (newUrl === selectedImage) return;
-
-    // Se não é a primeira carga, ativamos o loader e a animação de saída
     setIsImageLoading(true);
     
     if (mainImageRef.current) {
         gsap.to(mainImageRef.current, {
             opacity: 0,
-            scale: 0.96,
+            scale: 0.95,
             duration: 0.2,
             ease: "power1.out",
-            onComplete: () => {
-                setSelectedImage(newUrl);
-            }
+            onComplete: () => setSelectedImage(newUrl)
         });
     } else {
         setSelectedImage(newUrl);
@@ -79,23 +90,10 @@ export default function ProductView({ product }: ProductViewProps) {
   });
 
   const handleImageLoadComplete = contextSafe(() => {
-    setIsImageLoading(false); 
-    
-    // ⚡ LCP OPTIMIZATION: Se for a primeira carga, NÃO anima.
-    // O navegador pinta a imagem instantaneamente.
-    if (isFirstLoad.current) {
-        isFirstLoad.current = false;
-        // Garante que a imagem esteja visível e no tamanho certo (caso o CSS tenha falhado)
-        if (mainImageRef.current) {
-            gsap.set(mainImageRef.current, { opacity: 1, scale: 1 });
-        }
-        return; 
-    }
-
-    // Se NÃO for a primeira carga (o usuário clicou numa thumb), faz a animação bonita.
+    setIsImageLoading(false);
     if (mainImageRef.current) {
         gsap.fromTo(mainImageRef.current, 
-            { opacity: 0, scale: 0.96 },
+            { opacity: 0, scale: 0.95 },
             { opacity: 1, scale: 1, duration: 0.4, ease: "power2.out" }
         );
     }
@@ -109,6 +107,7 @@ export default function ProductView({ product }: ProductViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentVariant]);
 
+  // --- HANDLERS ---
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (isImageLoading) return;
@@ -124,14 +123,17 @@ export default function ProductView({ product }: ProductViewProps) {
 
   const handleAddToCart = async () => {
     if (!currentVariant || !currentVariant.availableForSale || isAdding) return;
+    
     setIsAdding(true);
     try {
         await addItem(currentVariant.id, 1);
         setIsAdding(false);
         setIsSuccess(true);
+        
         toast.success(`${product.title} adicionado!`, {
             style: { background: '#101010', color: '#fff', border: '1px solid #333' }
         });
+
         setTimeout(() => {
           setIsSuccess(false);
           openCart(); 
@@ -142,14 +144,34 @@ export default function ProductView({ product }: ProductViewProps) {
     }
   };
 
+  // 🔥 BLINDAGEM: Handler de CEP com validação extra
   const handleShippingSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentVariant) {
         toast.warning("Selecione as opções do produto primeiro.");
         return;
     }
+    // Remove traço para validar tamanho
+    const rawCep = cep.replace(/\D/g, '');
+    if (rawCep.length !== 8) {
+        toast.error("CEP incompleto.");
+        return;
+    }
+
     const price = parseFloat(currentVariant.price.amount);
-    calculateShipping(price);
+    // Aqui poderiamos passar o peso se tivessemos no metaobject, assumindo 1kg padrão
+    calculateShipping(price); 
+  };
+
+  // 🔥 BLINDAGEM: Máscara visual no input
+  const handleCepInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let v = e.target.value.replace(/\D/g, '');
+    if (v.length > 8) v = v.substring(0, 8);
+    // Aplica mascara XXXXX-XXX visualmente
+    if (v.length > 5) {
+        v = v.replace(/^(\d{5})(\d)/, '$1-$2');
+    }
+    handleCepChange(v);
   };
 
   if (!product) return null;
@@ -173,10 +195,7 @@ export default function ProductView({ product }: ProductViewProps) {
                 onMouseLeave={handleMouseLeave}
             >
               {isImageLoading && (
-                  <div style={{
-                      position: 'absolute', top: '50%', left: '50%', 
-                      transform: 'translate(-50%, -50%)', zIndex: 5
-                  }}>
+                  <div className={styles.loaderOverlay}>
                       <Loader2 className={styles.spin} size={40} color="#FFDA45" />
                   </div>
               )}
@@ -186,15 +205,10 @@ export default function ProductView({ product }: ProductViewProps) {
                 src={selectedImage} 
                 alt={product.title} 
                 fill 
-                priority // Mantém prioridade máxima
-                quality={90} // ⚡ Qualidade Premium para Embalagens
+                priority 
                 className={styles.mainImage}
                 style={zoomStyle}
-                // ⚡ LCP OPTIMIZATION: Sizes calculados matematicamente
-                // Mobile (até 768px): Ocupa quase 100% da tela (tirando paddings) = 95vw
-                // Tablet (até 1200px): Ocupa metade da tela = 50vw
-                // Desktop (> 1200px): O container trava em 650px fixos. Não precisa baixar imagem 4K.
-                sizes="(max-width: 768px) 95vw, (max-width: 1200px) 50vw, 650px"
+                sizes="(max-width: 768px) 100vw, 50vw"
                 onLoad={handleImageLoadComplete}
               />
             </div>
@@ -206,16 +220,13 @@ export default function ProductView({ product }: ProductViewProps) {
                   className={`${styles.thumbBox} ${selectedImage === node.url ? styles.thumbActive : ''}`}
                   onClick={() => requestImageChange(node.url)}
                   role="button"
-                  tabIndex={0}
                 >
                   <Image 
                     src={node.url} 
                     alt={`Ver imagem ${idx + 1}`} 
                     fill 
                     className={styles.thumbImg} 
-                    // Thumbs são pequenas, não precisam de muita resolução
                     sizes="80px" 
-                    quality={60}
                   />
                 </div>
               ))}
@@ -229,6 +240,8 @@ export default function ProductView({ product }: ProductViewProps) {
             
             <div className={styles.priceWrapper}>
                 <span className={styles.priceValue}>{currentPrice}</span>
+                {/* 🔥 BLINDAGEM: Mostrar parcelamento fake ou real se tiver lógica */}
+                <span className={styles.installments}>em até 12x no cartão</span>
             </div>
 
             <div className={styles.controlsRow}>
@@ -246,10 +259,12 @@ export default function ProductView({ product }: ProductViewProps) {
                 ))}
             </div>
 
+            {/* BOTÃO DESKTOP (Escondido no Mobile via CSS se usar o Sticky Bar) */}
             <button 
                 className={`
                   ${styles.addToCartBtn} 
                   ${isSuccess ? styles.btnSuccess : ''}
+                  ${styles.desktopBtn} 
                 `}
                 onClick={handleAddToCart}
                 disabled={!isAvailable || isAdding || isSuccess}
@@ -268,6 +283,7 @@ export default function ProductView({ product }: ProductViewProps) {
             {/* FRETE */}
             <div className={styles.shippingSection}>
                 <div className={styles.shippingHeader}>
+                    <Truck size={18} color="#FFDA45"/>
                     <span className={styles.sectionLabel}>Calcular Frete e Prazo</span>
                 </div>
                 
@@ -277,15 +293,17 @@ export default function ProductView({ product }: ProductViewProps) {
                         placeholder="00000-000" 
                         className={styles.shippingInput}
                         value={cep}
-                        onChange={(e) => handleCepChange(e.target.value)}
+                        onChange={handleCepInput} // 🔥 Usa o handler com máscara
                         maxLength={9}
+                        inputMode="numeric" // Teclado numérico no mobile
                     />
                     <button type="submit" className={styles.shippingBtn} disabled={cepLoading}>
                         {cepLoading ? <Loader2 className={styles.spin} size={18}/> : <ArrowRight size={18} />}
                     </button>
                 </form>
                 
-                {shippingOptions && (
+                {/* Render Condicional Robusto */}
+                {showShippingResults && shippingOptions && (
                    <div className={styles.shippingResultsList}>
                       {shippingOptions.map((opt, idx) => (
                           <div key={idx} className={styles.shippingOption}>

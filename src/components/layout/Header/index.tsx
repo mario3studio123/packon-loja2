@@ -1,8 +1,9 @@
+// src/components/layout/header/index.tsx
 "use client";
 
 import { useRef, useState, useEffect } from "react";
 import { Search, ShoppingCart } from "lucide-react";
-import Link from "next/link"; // Usaremos Link padrão ou div para os botões de scroll
+import Link from "next/link"; 
 import Image from "next/image";
 import styles from "./header.module.css";
 import gsap from "gsap";
@@ -12,19 +13,16 @@ import CartContent from "./CartContent";
 import SearchBox from "./SearchBox";
 import MobileSearchResults from "./MobileSearchResults";
 import TransitionLink from "@/components/ui/TransitionLink";
-import { useLenis } from "@/components/ui/SmoothScroll"; // Importe o hook do Lenis
+import { useLenis } from "@/components/ui/SmoothScroll"; 
 import { usePathname, useRouter } from "next/navigation";
 
 export default function Header() {
   const headerRef = useRef<HTMLElement>(null);
-  const lenis = useLenis(); // Pegamos a instância do scroll
+  const lenis = useLenis(); 
   const pathname = usePathname();
   const router = useRouter();
 
-  // ... (Mantenha todas as suas refs: mobileContentRef, cartContentRef, etc...)
-  // ... (Mantenha todos os seus states: isMobileMenuOpen, cart store...)
-  
-  // REFS E STATES (Copiados do seu código para contexto)
+  // Refs e States
   const mobileContentRef = useRef<HTMLDivElement>(null); 
   const mobileMenuRef = useRef<HTMLDivElement>(null);
   const mobileCartRef = useRef<HTMLDivElement>(null);
@@ -32,23 +30,45 @@ export default function Header() {
   const line1Ref = useRef<HTMLSpanElement>(null);
   const line2Ref = useRef<HTMLSpanElement>(null);
   const line3Ref = useRef<HTMLSpanElement>(null);
+  
+  // 🔥 CORREÇÃO: Ref para guardar a altura anterior do header e evitar o "pulo"
+  const previousHeightRef = useRef<number | "auto">("auto");
+
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const { isOpen: isCartOpen, openCart, closeCart, cart } = useCartStore();
+  
+  // Timelines do GSAP
   const mobileTl = useRef<gsap.core.Timeline | null>(null);
   const cartTl = useRef<gsap.core.Timeline | null>(null);
-  const totalItems = cart?.lines?.edges?.length || 0;
+  
+  // Dados para monitoramento
+  const cartLines = cart?.lines?.edges || [];
+  const totalItems = cartLines.length; // Quantidade de LINHAS (produtos diferentes)
+  const totalQuantity = cart?.totalQuantity || 0;
 
-  // ... (Mantenha suas animações useGSAP e useEffects existentes exatamente como estão) ...
+  // --- 1. Sincroniza abertura/fechamento do Carrinho ---
+  useEffect(() => {
+    if (!cartTl.current) return;
 
+    if (isCartOpen) {
+      if (isMobileMenuOpen) toggleMobileMenu(); 
+      cartTl.current.play();
+      // Ao abrir, salvamos a altura atual como referência inicial
+      if (headerRef.current) previousHeightRef.current = headerRef.current.offsetHeight;
+    } else {
+      cartTl.current.reverse();
+    }
+  }, [isCartOpen]); 
+
+  // --- 2. Animação de Entrada Inicial e Configuração das Timelines ---
   const { contextSafe } = useGSAP(() => {
-     // ... (Sua animação de entrada e timelines mantidas iguais)
-     // ...
-     gsap.set(headerRef.current, { xPercent: -50, y: -150, autoAlpha: 0 });
-     gsap.to(headerRef.current, { y: 0, autoAlpha: 1, duration: 1.2, ease: "power4.out", delay: 0.2 });
-     
-     // ... (Copie suas Timelines mobileTl e cartTl aqui) ...
-     const mTl = gsap.timeline({ paused: true });
-     if (headerRef.current && mobileContentRef.current && line1Ref.current) {
+      // Entrada do Header
+      gsap.set(headerRef.current, { xPercent: -50, y: -150, autoAlpha: 0 });
+      gsap.to(headerRef.current, { y: 0, autoAlpha: 1, duration: 1.2, ease: "power4.out", delay: 0.2 });
+      
+      // Timeline Menu Mobile
+      const mTl = gsap.timeline({ paused: true });
+      if (headerRef.current && mobileContentRef.current && line1Ref.current) {
         mTl.set(mobileContentRef.current, { display: 'flex', autoAlpha: 0, y: -20 });
         mTl.to(line2Ref.current, { scaleX: 0, opacity: 0, duration: 0.2 }, 0)
            .to(line1Ref.current, { y: 9, rotate: 45, duration: 0.3 }, 0)
@@ -57,22 +77,61 @@ export default function Header() {
         mTl.to(mobileContentRef.current, { autoAlpha: 1, y: 0, duration: 0.6, ease: "power2.out" }, "-=0.5");
         mTl.set(mobileMenuRef.current, { autoAlpha: 1, display: 'flex' }, 0);
         mTl.set(mobileCartRef.current, { autoAlpha: 0, display: 'none' }, 0);
-     }
-     mobileTl.current = mTl;
+      }
+      mobileTl.current = mTl;
 
-     const cTl = gsap.timeline({ paused: true });
-     if (headerRef.current && cartContentRef.current) {
+      // Timeline Carrinho Desktop
+      const cTl = gsap.timeline({ paused: true });
+      if (headerRef.current && cartContentRef.current) {
         cTl.set(cartContentRef.current, { display: 'flex', autoAlpha: 0, y: -20 })
            .to(headerRef.current, { height: "auto", borderRadius: "32px", backgroundColor: "rgba(20,20,20,0.6)", duration: 0.9, ease: "expo.inOut" })
            .to(cartContentRef.current, { autoAlpha: 1, y: 0, duration: 0.6, ease: "power2.out" }, "-=0.5");
-     }
-     cartTl.current = cTl;
+      }
+      cartTl.current = cTl;
 
   }, { scope: headerRef });
 
-  // ... (Mantenha switchMobileView, toggleMobileMenu, handleCartClick iguais) ...
+  // --- 3. 🔥 CORREÇÃO: Animação Fluida ao Adicionar/Remover Itens ---
+  // Monitoramos apenas 'totalItems'. Se mudar, forçamos o efeito "grow".
+  useGSAP(() => {
+    // Só anima se o carrinho estiver visível E se tivermos uma referência válida
+    if (isCartOpen && headerRef.current && typeof previousHeightRef.current === 'number') {
+        
+        // O React já renderizou, então 'headerRef.current.offsetHeight' é a NOVA altura (grande)
+        const newHeight = headerRef.current.offsetHeight;
+        const oldHeight = previousHeightRef.current;
+
+        // Se a altura mudou, fazemos a animação manual (fromTo)
+        if (newHeight !== oldHeight) {
+            gsap.fromTo(headerRef.current, 
+                { height: oldHeight }, // Começa visualmente da altura antiga
+                { 
+                  height: "auto", // Vai até a altura automática (que é a nova)
+                  duration: 0.4, 
+                  ease: "power2.out", // Curva suave
+                  overwrite: "auto", // Garante que não brigue com outras animações
+                  onComplete: () => {
+                     // Garante que fique "auto" no final para responsividade
+                     gsap.set(headerRef.current, { height: "auto" });
+                  }
+                }
+            );
+        }
+        
+        // Atualiza a referência para a próxima mudança
+        previousHeightRef.current = newHeight;
+    } else if (headerRef.current) {
+        // Se o carrinho estiver fechado ou abrindo agora, apenas atualizamos a ref silenciosamente
+        previousHeightRef.current = headerRef.current.offsetHeight;
+    }
+  }, { 
+    scope: headerRef, 
+    dependencies: [totalItems] // 🔥 Só dispara quando o número de itens na lista muda
+  });
+
+
+  // --- Funções Auxiliares (Sem alterações de layout) ---
   const switchMobileView = contextSafe((target: 'cart' | 'menu') => {
-    // ... (sua lógica existente)
     if (!mobileMenuRef.current || !mobileCartRef.current) return;
     if (target === 'cart') {
       gsap.to(mobileMenuRef.current, { autoAlpha: 0, duration: 0.3, onComplete: () => {
@@ -91,21 +150,15 @@ export default function Header() {
 
   useEffect(() => {
     if (!lenis) return;
-
     if (isCartOpen || isMobileMenuOpen) {
-      // Pausa o scroll da página principal instantaneamente
       lenis.stop(); 
-      // Opcional: Adiciona classe no body para evitar scroll nativo se o Lenis falhar
       document.body.style.overflow = 'hidden'; 
     } else {
-      // Retoma o scroll suave
       lenis.start();
       document.body.style.overflow = '';
     }
-
-    // Cleanup de segurança
     return () => {
-      lenis.start();
+      lenis.start(); 
       document.body.style.overflow = '';
     };
   }, [isCartOpen, isMobileMenuOpen, lenis]);
@@ -129,52 +182,30 @@ export default function Header() {
       else openCart();
   };
 
-  // --- NOVA FUNÇÃO: SCROLL SUAVE PARA ÂNCORAS ---
-const handleScrollTo = (e: React.MouseEvent, targetId: string) => {
-    e.preventDefault(); // Evita o comportamento padrão de pular seco
-
-    // 1. Lógica para quando NÃO estamos na Home (Redirecionamento)
+  const handleScrollTo = (e: React.MouseEvent, targetId: string) => {
+    e.preventDefault();
     if (pathname !== "/") {
-      if (isMobileMenuOpen) toggleMobileMenu(); // Fecha se estiver aberto
+      if (isMobileMenuOpen) toggleMobileMenu();
       router.push("/");
-      
-      // Delay maior para dar tempo da página carregar
       setTimeout(() => {
         const element = document.getElementById(targetId);
         if (element) element.scrollIntoView({ behavior: 'smooth' });
       }, 800);
       return;
     }
-
-    // 2. Se o Lenis não estiver carregado, fallback nativo
     if (!lenis) {
        const element = document.getElementById(targetId);
        if (element) element.scrollIntoView({ behavior: 'smooth' });
        return;
     }
-
-    // 3. Lógica Mobile e Desktop Unificadas
     if (isMobileMenuOpen) {
-      // A. Fecha o menu visualmente (inicia animação reversa)
       toggleMobileMenu();
-
-      // B. FORÇA O DESTRAVAMENTO IMEDIATO
-      // Não esperamos o useEffect reagir ao state, destravamos agora para o scroll funcionar
       lenis.start();
       document.body.style.overflow = '';
-
-      // C. Executa o scroll com leve delay para suavidade visual (espera o menu começar a subir)
       setTimeout(() => {
-        lenis.scrollTo(`#${targetId}`, { 
-            offset: -100, // Compensação da altura do Header
-            duration: 1.5,
-            lock: true, // Garante que o scroll aconteça mesmo se o usuário tentar intervir
-            force: true // Força o scroll mesmo se o lenis achar que está parado
-        });
-      }, 300); // 300ms casa bem com a animação de saída do menu
-
+        lenis.scrollTo(`#${targetId}`, { offset: -100, duration: 1.5, lock: true, force: true });
+      }, 300);
     } else {
-      // Desktop ou Menu Fechado: Scroll direto
       lenis.scrollTo(`#${targetId}`, { offset: -100, duration: 1.5 });
     }
   };
@@ -189,25 +220,18 @@ const handleScrollTo = (e: React.MouseEvent, targetId: string) => {
             </div>
           </TransitionLink>
 
-          {/* Desktop Nav - ATUALIZADO */}
           <nav className={styles.desktopNav}>
              <TransitionLink href="/" className={styles.navLink}>Início</TransitionLink>
              <TransitionLink href="/produtos" className={styles.navLink}>Catálogo</TransitionLink>
-             
-             {/* LINKS SCROLLAVEIS */}
-             <a href="#quem-somos" onClick={(e) => handleScrollTo(e, 'quem-somos')} className={styles.navLink}>
-               Quem somos
-             </a>
-             <a href="#contato" onClick={(e) => handleScrollTo(e, 'contato')} className={styles.navLink}>
-               Contato
-             </a>
+             <a href="#quem-somos" onClick={(e) => handleScrollTo(e, 'quem-somos')} className={styles.navLink}>Quem somos</a>
+             <a href="#contato" onClick={(e) => handleScrollTo(e, 'contato')} className={styles.navLink}>Contato</a>
           </nav>
 
           <div className={styles.desktopActions}>
             <SearchBox />
             <button className={styles.cartButton} onClick={handleCartClick}>
               <ShoppingCart className={styles.cartIcon} size={26} />
-              {totalItems > 0 && <span className={styles.badge}>{totalItems}</span>}
+              {totalQuantity > 0 && <span className={styles.badge}>{totalQuantity}</span>}
             </button>
           </div>
 
@@ -228,27 +252,17 @@ const handleScrollTo = (e: React.MouseEvent, targetId: string) => {
                 <SearchBox isMobile={true} />
                 <MobileSearchResults onLinkClick={toggleMobileMenu} />
              </div>
-
              <button className={styles.mobileCartBtn} onClick={() => switchMobileView('cart')}>
                 <ShoppingCart size={32} />
-                <span>Carrinho ({totalItems})</span>
+                <span>Carrinho ({totalQuantity})</span>
              </button>
-
-             {/* Mobile Nav - ATUALIZADO */}
              <nav className={styles.mobileNav}>
                <TransitionLink href="/" className={styles.mobileNavLink} onClick={toggleMobileMenu}>Início</TransitionLink>
                <TransitionLink href="/produtos" className={styles.mobileNavLink} onClick={toggleMobileMenu}>Catálogo</TransitionLink>
-               
-               {/* LINKS SCROLLAVEIS MOBILE */}
-               <a href="#quem-somos" onClick={(e) => handleScrollTo(e, 'quem-somos')} className={styles.mobileNavLink}>
-                 Quem somos
-               </a>
-               <a href="#contato" onClick={(e) => handleScrollTo(e, 'contato')} className={styles.mobileNavLink}>
-                 Contato
-               </a>
+               <a href="#quem-somos" onClick={(e) => handleScrollTo(e, 'quem-somos')} className={styles.mobileNavLink}>Quem somos</a>
+               <a href="#contato" onClick={(e) => handleScrollTo(e, 'contato')} className={styles.mobileNavLink}>Contato</a>
              </nav>
           </div>
-
           <div className={styles.mobileCartWrapper} ref={mobileCartRef} style={{ display: 'none', opacity: 0 }}>
              <CartContent onBack={() => switchMobileView('menu')} />
           </div>
