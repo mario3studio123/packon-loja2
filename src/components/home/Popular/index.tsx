@@ -89,3 +89,5 @@ export default function Popular({ products }: PopularProps) {
     </section>
   );
 }
+
+
